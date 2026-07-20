@@ -12,6 +12,7 @@ from analyzer import (
 )
 from anilist_api import AniListError, fetch_completed_anime as fetch_anilist_completed, fetch_trending_anime
 from bangumi_api import BangumiError, fetch_completed_anime as fetch_bangumi_completed, fetch_ranked_anime
+from comparison import compare_profiles, compare_text, comparison_summary
 from i18n import t
 from profile_card import CARD_CSS, build_profile_card_html, build_profile_card_markdown, card_text
 from profile_generator import classify_rating_style, classify_taste_archetype, generate_profile_report
@@ -180,6 +181,20 @@ def show_share_card(
     )
 
 
+def profile_parts(df: pd.DataFrame, lang: str, tone: str) -> tuple[dict, dict[str, pd.DataFrame], dict[str, str], dict[str, str]]:
+    stats = compute_rating_stats(df)
+    preferences = compute_preference_profile(df)
+    rating_style = classify_rating_style(stats, lang=lang, tone=tone)
+    archetype = classify_taste_archetype(
+        preferences["top_positive_genres"],
+        preferences["top_positive_tags"],
+        rating_style,
+        lang=lang,
+        tone=tone,
+    )
+    return stats, preferences, rating_style, archetype
+
+
 def render_profile(source: str, username: str, lang: str, tone: str) -> None:
     try:
         with st.spinner(copy(lang, tone, "fetching", source=source)):
@@ -192,16 +207,7 @@ def render_profile(source: str, username: str, lang: str, tone: str) -> None:
         st.error(copy(lang, tone, "no_data"))
         return
 
-    stats = compute_rating_stats(df)
-    preferences = compute_preference_profile(df)
-    rating_style = classify_rating_style(stats, lang=lang, tone=tone)
-    archetype = classify_taste_archetype(
-        preferences["top_positive_genres"],
-        preferences["top_positive_tags"],
-        rating_style,
-        lang=lang,
-        tone=tone,
-    )
+    stats, preferences, rating_style, archetype = profile_parts(df, lang, tone)
     report = generate_profile_report(
         stats,
         preferences,
@@ -290,6 +296,96 @@ def render_profile(source: str, username: str, lang: str, tone: str) -> None:
     show_recommendations(source, df, preferences, lang, tone)
 
 
+def _joined(items: list[str], lang: str) -> str:
+    if not items:
+        return compare_text(lang, "no_overlap")
+    return ", ".join(items)
+
+
+def render_comparison(source: str, username_a: str, username_b: str, lang: str, tone: str) -> None:
+    try:
+        with st.spinner(compare_text(lang, "fetching_pair", source=source)):
+            user_a, df_a = load_profile_data(source, username_a)
+            user_b, df_b = load_profile_data(source, username_b)
+    except (AniListError, BangumiError) as exc:
+        st.error(str(exc))
+        return
+
+    if df_a.empty or df_b.empty:
+        st.error(copy(lang, tone, "no_data"))
+        return
+
+    stats_a, preferences_a, rating_style_a, archetype_a = profile_parts(df_a, lang, tone)
+    stats_b, preferences_b, rating_style_b, archetype_b = profile_parts(df_b, lang, tone)
+    comparison = compare_profiles(
+        user_a["name"],
+        user_b["name"],
+        df_a,
+        df_b,
+        stats_a,
+        stats_b,
+        preferences_a,
+        preferences_b,
+    )
+
+    st.subheader(compare_text(lang, "comparison_title"))
+    metric_cols = st.columns(4)
+    metric_cols[0].metric(compare_text(lang, "similarity"), f"{comparison['similarity']}%")
+    metric_cols[1].metric(compare_text(lang, "shared_completed"), comparison["common_count"])
+    if comparison["score_correlation"] is None:
+        metric_cols[2].metric(compare_text(lang, "score_sync"), copy(lang, tone, "unavailable"))
+    else:
+        metric_cols[2].metric(compare_text(lang, "score_sync"), f"{comparison['score_correlation']:.2f}")
+    metric_cols[3].metric(
+        compare_text(lang, "stricter"),
+        comparison["stricter_user"] or compare_text(lang, "similar_strictness"),
+    )
+    st.write(comparison_summary(comparison, lang))
+
+    profile_cols = st.columns(2)
+    for col, user, stats, rating_style, archetype in [
+        (profile_cols[0], user_a, stats_a, rating_style_a, archetype_a),
+        (profile_cols[1], user_b, stats_b, rating_style_b, archetype_b),
+    ]:
+        col.markdown(f"### {user['name']}")
+        col.metric(copy(lang, tone, "completed"), stats["total_completed"])
+        col.metric(copy(lang, tone, "average"), f"{stats['average_score']:.2f}")
+        col.write(f"**{archetype['name']}**")
+        col.caption(rating_style["name"])
+
+    st.subheader(compare_text(lang, "common_favorites"))
+    if comparison["common_favorites"]:
+        favorites = pd.DataFrame(comparison["common_favorites"]).rename(
+            columns={
+                "title_a": copy(lang, tone, "title"),
+                "score_a": user_a["name"],
+                "score_b": user_b["name"],
+            }
+        )
+        st.dataframe(favorites, hide_index=True, width="stretch")
+    else:
+        st.info(compare_text(lang, "no_overlap"))
+
+    signal_cols = st.columns(3)
+    signal_cols[0].markdown(f"**{compare_text(lang, 'shared_likes')}**")
+    signal_cols[0].write(_joined(comparison["shared_likes"], lang))
+    signal_cols[1].markdown(f"**{compare_text(lang, 'shared_weak_spots')}**")
+    signal_cols[1].write(_joined(comparison["shared_weak_spots"], lang))
+    signal_cols[2].markdown(f"**{compare_text(lang, 'taste_clashes')}**")
+    clashes = []
+    if comparison["a_likes_b_avoids"]:
+        clashes.append(
+            f"{compare_text(lang, 'user_a_likes_b_avoids', a=user_a['name'], b=user_b['name'])}: "
+            f"{', '.join(comparison['a_likes_b_avoids'])}"
+        )
+    if comparison["b_likes_a_avoids"]:
+        clashes.append(
+            f"{compare_text(lang, 'user_b_likes_a_avoids', a=user_a['name'], b=user_b['name'])}: "
+            f"{', '.join(comparison['b_likes_a_avoids'])}"
+        )
+    signal_cols[2].write("\n\n".join(clashes) if clashes else compare_text(lang, "no_overlap"))
+
+
 use_chinese = st.sidebar.toggle(
     "中文 / English",
     value=st.session_state.get("language_mode", "en") == "zh",
@@ -307,28 +403,65 @@ tone = "anime" if use_anime_tone else "standard"
 st.session_state.tone_mode = tone
 
 source = st.sidebar.radio(copy(lang, tone, "source"), ["AniList", "Bangumi"], horizontal=True)
+mode = st.sidebar.radio(
+    compare_text(lang, "mode"),
+    ["profile", "compare"],
+    format_func=lambda value: compare_text(lang, "profile_mode" if value == "profile" else "compare_mode"),
+    horizontal=True,
+)
 
 st.title(copy(lang, tone, "page_title"))
 
-with st.form("taste-form"):
-    username = st.text_input(
-        copy(lang, tone, "username", source=source),
-        placeholder=copy(lang, tone, "username_placeholder", source=source),
-        key=f"username_{source}",
-    )
-    analyze = st.form_submit_button(copy(lang, tone, "analyze"), type="primary")
+if mode == "profile":
+    with st.form("taste-form"):
+        username = st.text_input(
+            copy(lang, tone, "username", source=source),
+            placeholder=copy(lang, tone, "username_placeholder", source=source),
+            key=f"username_{source}",
+        )
+        analyze = st.form_submit_button(copy(lang, tone, "analyze"), type="primary")
 
-if analyze:
-    clean_username = username.strip()
-    if not clean_username:
-        st.warning(copy(lang, tone, "empty_username", source=source))
-        st.stop()
+    if analyze:
+        clean_username = username.strip()
+        if not clean_username:
+            st.warning(copy(lang, tone, "empty_username", source=source))
+            st.stop()
 
-    st.session_state.profile_request = {
-        "source": source,
-        "username": clean_username,
-    }
+        st.session_state.profile_request = {
+            "mode": "profile",
+            "source": source,
+            "username": clean_username,
+        }
+else:
+    with st.form("compare-form"):
+        user_cols = st.columns(2)
+        username_a = user_cols[0].text_input(
+            compare_text(lang, "first_username", source=source),
+            key=f"compare_username_a_{source}",
+        )
+        username_b = user_cols[1].text_input(
+            compare_text(lang, "second_username", source=source),
+            key=f"compare_username_b_{source}",
+        )
+        compare_submit = st.form_submit_button(compare_text(lang, "compare_button"), type="primary")
+
+    if compare_submit:
+        clean_a = username_a.strip()
+        clean_b = username_b.strip()
+        if not clean_a or not clean_b or clean_a == clean_b:
+            st.warning(compare_text(lang, "empty_compare", source=source))
+            st.stop()
+
+        st.session_state.profile_request = {
+            "mode": "compare",
+            "source": source,
+            "username_a": clean_a,
+            "username_b": clean_b,
+        }
 
 request = st.session_state.get("profile_request")
 if request:
-    render_profile(request["source"], request["username"], lang, tone)
+    if request.get("mode") == "compare":
+        render_comparison(request["source"], request["username_a"], request["username_b"], lang, tone)
+    else:
+        render_profile(request["source"], request["username"], lang, tone)

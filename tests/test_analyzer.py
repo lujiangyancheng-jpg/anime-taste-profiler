@@ -10,6 +10,7 @@ APP_DIR = Path(__file__).resolve().parents[1] / "anime-taste-profiler"
 sys.path.insert(0, str(APP_DIR))
 
 from analyzer import compute_preference_profile, compute_rating_stats, normalize_score, score_distribution
+from comparison import compare_profiles
 from profile_card import build_profile_card_markdown
 from recommender import score_recommendations
 
@@ -121,6 +122,41 @@ class AnalyzerTests(unittest.TestCase):
         self.assertIn("tester - Action Viewer", markdown)
         self.assertIn("Action", markdown)
         self.assertIn("Robots", markdown)
+
+    def test_compare_profiles_finds_shared_favorites_and_clashes(self) -> None:
+        df_a = pd.DataFrame(
+            [
+                {"media_id": 1, "title": "Shared Hit", "score": 9.0},
+                {"media_id": 2, "title": "Only A", "score": 7.0},
+            ]
+        )
+        df_b = pd.DataFrame(
+            [
+                {"media_id": 1, "title": "Shared Hit", "score": 8.5},
+                {"media_id": 3, "title": "Only B", "score": 6.0},
+            ]
+        )
+        stats_a = {"average_score": 8.0}
+        stats_b = {"average_score": 7.0}
+        preferences_a = {
+            "top_positive_genres": pd.DataFrame([{"name": "Action"}]),
+            "top_negative_genres": pd.DataFrame([{"name": "Drama"}]),
+            "top_positive_tags": pd.DataFrame(),
+            "top_negative_tags": pd.DataFrame(),
+        }
+        preferences_b = {
+            "top_positive_genres": pd.DataFrame([{"name": "Action"}]),
+            "top_negative_genres": pd.DataFrame([{"name": "Robots"}]),
+            "top_positive_tags": pd.DataFrame([{"name": "Drama"}]),
+            "top_negative_tags": pd.DataFrame(),
+        }
+
+        result = compare_profiles("a", "b", df_a, df_b, stats_a, stats_b, preferences_a, preferences_b)
+
+        self.assertEqual(result["common_count"], 1)
+        self.assertEqual(result["common_favorites"][0]["title_a"], "Shared Hit")
+        self.assertIn("Action", result["shared_likes"])
+        self.assertIn("Drama", result["b_likes_a_avoids"])
 
 
 if __name__ == "__main__":
