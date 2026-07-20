@@ -13,6 +13,7 @@ from analyzer import (
 from anilist_api import AniListError, fetch_completed_anime as fetch_anilist_completed, fetch_trending_anime
 from bangumi_api import BangumiError, fetch_completed_anime as fetch_bangumi_completed, fetch_ranked_anime
 from i18n import t
+from profile_card import CARD_CSS, build_profile_card_html, build_profile_card_markdown, card_text
 from profile_generator import classify_rating_style, classify_taste_archetype, generate_profile_report
 from recommender import score_recommendations
 
@@ -128,6 +129,48 @@ def show_recommendations(
         )
 
 
+def show_share_card(
+    user_name: str,
+    source: str,
+    stats: dict,
+    preferences: dict[str, pd.DataFrame],
+    rating_style: dict[str, str],
+    archetype: dict[str, str],
+    lang: str,
+    tone: str,
+) -> None:
+    st.subheader(card_text(lang, tone, "share_card"))
+    st.markdown(
+        CARD_CSS
+        + build_profile_card_html(
+            user_name,
+            source,
+            stats,
+            preferences,
+            rating_style,
+            archetype,
+            lang,
+            tone,
+        ),
+        unsafe_allow_html=True,
+    )
+    st.download_button(
+        card_text(lang, tone, "download_card"),
+        data=build_profile_card_markdown(
+            user_name,
+            source,
+            stats,
+            preferences,
+            rating_style,
+            archetype,
+            lang,
+            tone,
+        ),
+        file_name=f"{user_name}-{source}-anime-taste-card.md",
+        mime="text/markdown",
+    )
+
+
 def render_profile(source: str, username: str, lang: str, tone: str) -> None:
     try:
         with st.spinner(copy(lang, tone, "fetching", source=source)):
@@ -211,6 +254,8 @@ def render_profile(source: str, username: str, lang: str, tone: str) -> None:
 
     st.subheader(copy(lang, tone, "report"))
     st.write(report)
+
+    show_share_card(user["name"], source, stats, preferences, rating_style, archetype, lang, tone)
 
     with st.expander(copy(lang, tone, "top_bottom")):
         display_cols = ["title", "score", "average_score_10", "format", "episodes", "season_year"]

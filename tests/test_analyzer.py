@@ -10,6 +10,7 @@ APP_DIR = Path(__file__).resolve().parents[1] / "anime-taste-profiler"
 sys.path.insert(0, str(APP_DIR))
 
 from analyzer import compute_preference_profile, compute_rating_stats, normalize_score, score_distribution
+from profile_card import build_profile_card_markdown
 from recommender import score_recommendations
 
 
@@ -88,6 +89,37 @@ class AnalyzerTests(unittest.TestCase):
         self.assertEqual(len(recommendations), 1)
         self.assertEqual(recommendations[0]["title"], "Mecha Star")
         self.assertIn("Action", recommendations[0]["reasons"])
+
+    def test_profile_card_markdown_contains_core_signals(self) -> None:
+        stats = {
+            "total_completed": 3,
+            "average_score": 7.33,
+            "pct_scores_gte_8": 66.67,
+            "avg_user_minus_site": 0.33,
+        }
+        preferences = {
+            "top_positive_genres": pd.DataFrame([{"name": "Action"}]),
+            "top_negative_genres": pd.DataFrame([{"name": "Drama"}]),
+            "top_positive_tags": pd.DataFrame([{"name": "Robots"}]),
+            "top_negative_tags": pd.DataFrame([{"name": "Sad"}]),
+        }
+        rating_style = {"name": "Balanced Rater", "explanation": "Uses the scale."}
+        archetype = {"name": "Action Viewer", "explanation": "Likes motion."}
+
+        markdown = build_profile_card_markdown(
+            "tester",
+            "AniList",
+            stats,
+            preferences,
+            rating_style,
+            archetype,
+            "en",
+            "standard",
+        )
+
+        self.assertIn("tester - Action Viewer", markdown)
+        self.assertIn("Action", markdown)
+        self.assertIn("Robots", markdown)
 
 
 if __name__ == "__main__":
