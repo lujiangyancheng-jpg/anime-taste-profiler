@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: anime-taste-profiler
+    env: python
+    buildCommand: cd anime-taste-profiler && pip install -r requirements.txt
+    startCommand: cd anime-taste-profiler && streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    plan: free
