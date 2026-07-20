@@ -88,6 +88,7 @@ class AnalyzerTests(unittest.TestCase):
 
         self.assertEqual(len(recommendations), 1)
         self.assertEqual(recommendations[0]["title"], "Mecha Star")
+        self.assertGreaterEqual(recommendations[0]["match_score"], 70)
         self.assertIn("Action", recommendations[0]["reasons"])
 
     def test_profile_card_markdown_contains_core_signals(self) -> None:

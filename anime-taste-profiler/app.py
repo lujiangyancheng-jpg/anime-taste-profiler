@@ -104,8 +104,17 @@ def show_recommendations(
         st.info(copy(lang, tone, "no_recommendations"))
         return
 
+    fit_labels = {
+        "strong": {"en": "strong match", "zh": "强匹配"},
+        "good": {"en": "good match", "zh": "稳匹配"},
+        "niche": {"en": "niche match", "zh": "偏门匹配"},
+    }
+
     for item in recommendations:
         details = []
+        fit_label = fit_labels.get(item.get("fit_level"), fit_labels["niche"]).get(lang, fit_labels["niche"]["en"])
+        match_text = f"Match {item['match_score']}/100 · {fit_label}" if lang == "en" else f"匹配度 {item['match_score']}/100 · {fit_label}"
+        details.append(match_text)
         if item.get("year"):
             details.append(str(item["year"]))
         if item.get("format"):
